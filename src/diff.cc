@@ -1,17 +1,32 @@
 #include "diff.h"
 #include <algorithm>
+#include <iostream>
 
 namespace diff
 {
+	static int comp_abs (size_t key, size_t const& offset, size_t const& node)
+	{
+		 return key < offset ? -1 : (key == offset ? 0 : +1);
+	}
+	
+	static void insert (cache_t& cache, size_t offset, std::vector<std::string> const& lines, oak::basic_tree_t<size_t, cache_t::string_id_t>& tree, bool isA)
+	{
+		auto insertPosition = tree.upper_bound(offset, comp_abs);
+		for(auto& line : lines)
+		{
+			auto alreadyThere = cache.stringToId.find(line);
+			if(alreadyThere == cache.stringToId.end())
+				alreadyThere = cache.stringToId.emplace(line, cache.identity++).first;
+			insertPosition = ++tree.insert(insertPosition, 1, alreadyThere->second);
+			auto& positions = cache.line_positions[alreadyThere->second];
+			(isA ? positions.first : positions.second).push_back(offset++);
+		}
+	}
+
 	static void setup (cache_t& cache, std::vector<std::string> const& linesA, std::vector<std::string> const& linesB)
 	{
-		size_t index = 0;
-		for(auto& line : linesA)
-			cache.line_positions[line].first.push_back(index++);
-
-		index = 0;
-		for(auto& line : linesB)
-			cache.line_positions[line].second.push_back(index++);
+		insert(cache, 0, linesA, cache.line_position_to_id_A, true);
+		insert(cache, 0, linesB, cache.line_position_to_id_B, false);
 	}
 
 	static auto lone_element_in_range (std::vector<size_t> const& vector, size_t low, size_t high)
@@ -25,17 +40,26 @@ namespace diff
 		return --lowerBound;
 	}
 
-	static std::vector<diff::position_t> unique (cache_t const& cache, size_t lowA, size_t lowB, size_t highA, size_t highB)
+	static std::vector<diff::position_t> unique (cache_t& cache, size_t lowA, size_t lowB, size_t highA, size_t highB)
 	{
+		size_t range = highA - lowA;
+		auto lineId = cache.line_position_to_id_A.find(lowA, comp_abs);
+
+		auto lines = cache.line_positions.find(lineId->value);
 
 		std::map<size_t, size_t> b_to_a;
-		for(auto& lines : cache.line_positions)
+		while(range-- > 0)
 		{
-			auto iterB = lone_element_in_range(lines.second.second, lowB, highB);
-			if(iterB == lines.second.second.end())
+			if(lines != cache.line_positions.end() && lines->first != lineId->value) {
+				lines = cache.line_positions.find(lineId->value);
+			}
+			auto tempLines = lines++;
+			++lineId;
+			auto iterB = lone_element_in_range(tempLines->second.second, lowB, highB);
+			if(iterB == tempLines->second.second.end())
 				continue;
-			auto iterA = lone_element_in_range(lines.second.first, lowA, highA);
-			if(iterA == lines.second.first.end())
+			auto iterA = lone_element_in_range(tempLines->second.first, lowA, highA);
+			if(iterA == tempLines->second.first.end())
 				continue;
 			b_to_a[*iterB] = *iterA;
 		}
@@ -66,7 +90,7 @@ namespace diff
 		return result;
 	}
 
-	static void recurse (cache_t const& cache, std::vector<std::string> const& linesA, std::vector<std::string> const& linesB, size_t lowA, size_t lowB, size_t highA, size_t highB, std::vector<diff::position_t >& matches)
+	static void recurse (cache_t& cache, std::vector<std::string> const& linesA, std::vector<std::string> const& linesB, size_t lowA, size_t lowB, size_t highA, size_t highB, std::vector<diff::position_t >& matches)
 	{
 		if(lowA == highA || lowB == highB)
 			return;

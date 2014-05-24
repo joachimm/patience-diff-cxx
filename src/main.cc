@@ -45,11 +45,10 @@ int main (int argc, char const* argv[])
 {
 	if(argc != 3)
 		return -1;
-	
+
   std::vector<std::string> linesA = linesFromFile(argv[1]);
   std::vector<std::string> linesB = linesFromFile(argv[2]);
 
-  std::copy(linesA.begin(), linesA.end(), std::ostream_iterator<std::string>(std::cout, "\n"));
 	auto result = diff::diff(linesA, linesB);
 	printDiff(linesA, linesB, result);
 }

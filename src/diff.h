@@ -5,6 +5,7 @@
 #include <map>
 #include <vector>
 #include <string>
+#include "basic_tree.h"
 
 namespace diff
 {
@@ -23,7 +24,22 @@ namespace diff
 
 	struct cache_t
 	{
-		std::map<std::string, std::pair<std::vector<size_t>, std::vector<size_t> > > line_positions;
+		struct string_id_t
+		{
+			string_id_t ():_id(0) {}
+			explicit string_id_t (size_t id):_id(id) {}
+			bool operator< (string_id_t const& rhs) const { return _id < rhs._id; }
+			bool operator!= (string_id_t const& rhs) const { return _id != rhs._id; }
+			string_id_t operator++ (int) { return string_id_t(_id++); }
+
+			size_t _id;
+		};
+		std::map<string_id_t, std::pair<std::vector<size_t>, std::vector<size_t> > > line_positions;
+		oak::basic_tree_t<size_t, string_id_t> line_position_to_id_A;
+		oak::basic_tree_t<size_t, string_id_t> line_position_to_id_B;
+		
+		string_id_t identity;
+		std::map<std::string, string_id_t> stringToId;
 	};
 
 	std::vector<position_t> diff(std::vector<std::string> const& linesA, std::vector<std::string> const& linesB);
