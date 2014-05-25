@@ -10,6 +10,7 @@ namespace oak
 	{
 		basic_tree_t ()                                   { }
 		basic_tree_t (basic_tree_t const& rhs)            { _root = clone_node(rhs._root); _size = rhs._size; }
+		basic_tree_t (basic_tree_t&& rhs)                 { _root = rhs._root; _size = rhs._size; rhs._root = node_t::null_ptr(); }
 		~basic_tree_t ()                                  { clear(); }
 		basic_tree_t& operator= (basic_tree_t const& rhs) { _root = clone_node(rhs._root); _size = rhs._size; return *this; }
 
@@ -34,6 +35,7 @@ namespace oak
 		{
 			node_t () : _left(this), _right(this), _parent(this), _level(0) { }
 			node_t (_KeyT const& key, _ValueT const& value) : _left(null_ptr()), _right(null_ptr()), _parent(null_ptr()), _relative_key(key), _key_offset(key), _value(value) { }
+			node_t (_KeyT const& key, _ValueT&& value) : _left(null_ptr()), _right(null_ptr()), _parent(null_ptr()), _relative_key(key), _key_offset(key), _value(std::move(value)) { }
 
 			static node_t* null_ptr () { static node_t dummy; return &dummy; }
 			bool is_null () const      { return _level == 0; }
@@ -128,9 +130,9 @@ namespace oak
 					while(!_node->_left->is_null())
 						_node = _node->_left;
 				}
-		      else
+				else
 				{
-		         while(eq(_node, _node->_parent->_right))
+					while(eq(_node, _node->_parent->_right))
 						_node = _node->_parent;
 					_node = _node->_parent;
 				}
@@ -161,7 +163,7 @@ namespace oak
 					}
 			      else
 					{
-			         while(eq(_node, _node->_parent->_left))
+						while(eq(_node, _node->_parent->_left))
 							_node = _node->_parent;
 						_node = _node->_parent;
 					}
@@ -176,6 +178,19 @@ namespace oak
 				iterator tmp(*this);
 				--(*this);
 				return tmp;
+			}
+
+			iterator refresh ()
+			{
+				node_t* temp = _node;
+				_info.offset = temp->_left->key_offset();
+				while(!temp->_parent->is_null())
+				{
+					if(eq(temp, temp->_parent->_right))
+						_info.offset = _info.offset + temp->_parent->_left->key_offset() + temp->_parent->relative_key();
+					temp = temp->_parent;
+				}
+				return *this;
 			}
 
 		private:
@@ -201,6 +216,7 @@ namespace oak
 
 		iterator insert (iterator const& it, _KeyT const& key)                { return insert(it, key, _ValueT()); }
 		iterator insert (iterator it, _KeyT const& key, _ValueT const& value) { return insert_node(it._node, new node_t(key, value)); }
+		iterator insert (iterator it, _KeyT const& key, _ValueT&& value) { return insert_node(it._node, new node_t(key, std::move(value))); }
 		void erase (iterator const& it)                                       { if(it != end()) remove_node(it._node); }
 
 		void erase (iterator it, iterator const& last)

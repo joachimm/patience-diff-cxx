@@ -1,79 +1,177 @@
 #include "diff.h"
 #include <algorithm>
 #include <iostream>
+#include <set>
+#include "timer.h"
 
 namespace diff
 {
-
-	typedef std::vector<size_t> line_numbers_t;
-	struct doc_lines_t
-	{
-		line_numbers_t a_positions;
-		line_numbers_t b_positions;
-	};
-	typedef std::map<diff::cache_t::string_id_t, doc_lines_t> string_id_positions_t;
+	typedef std::map<cache_t::string_id_t, size_t> unique_map_t;
 
 	static int comp_abs (size_t key, size_t const& offset, size_t const& node)
 	{
 		 return key < offset ? -1 : (key == offset ? 0 : +1);
 	}
-
-	static void insert (cache_t& cache, string_id_positions_t& positions, cache_t::tree_t& tree, line_numbers_t doc_lines_t::*field, size_t offset, std::vector<std::string> const& lines)
+	static void dump (cache_t::tree_t& tree, std::map<cache_t::string_id_t, std::string >& inverse)
 	{
-		auto insertPosition = tree.upper_bound(offset, comp_abs);
+		for(auto tree_row : tree)
+		{
+			std::cout << "[" << tree_row.offset << "<" << tree_row.value->_id.to_s() << ">, ";
+			auto iter = tree_row.value->_previous;
+			while(iter != tree.end())
+			{
+				std::cout << iter->offset << "<"<< iter->value->_id.to_s()<< ">" <<", ";
+				iter = iter->value->_previous;
+			}
+			std::cout << "]" << inverse.find(tree_row.value->_id)->second << std::endl;
+		}
+	}
+
+	static void dump (cache_t& cache)
+	{
+		std::map<cache_t::string_id_t, std::string > inverse;
+		for(auto item : cache.stringToId)
+			inverse.insert(std::make_pair(item.second, item.first));
+		dump(cache.line_position_to_id_A, inverse);
+		dump(cache.line_position_to_id_B, inverse);
+	}
+
+	static bool unlink (cache_t& cache, cache_t::tree_t::iterator& removePosition, cache_t::top_link_t& previous)
+	{
+		auto stringId = removePosition->value->_id;
+		auto foundLink = previous.find(stringId)->second;
+		auto successor = foundLink;
+		while(foundLink != removePosition)
+		{
+			successor = foundLink;
+			foundLink = foundLink->value->_previous;
+		}
+
+		if(successor != foundLink)
+			successor->value->_previous = foundLink->value->_previous;
+		else
+		{
+			previous.erase(stringId);
+			return true;
+		}
+		return false;
+	}
+
+	static void remove (cache_t& cache, cache_t::tree_t& tree, size_t offset, std::vector<std::string> const& lines, cache_t::top_link_t& previous, cache_t::top_link_t& previousOther)
+	{
+		auto removePosition = tree.find(offset, comp_abs);
+		for(auto& line : lines)
+		{
+			bool last = unlink(cache, removePosition, previous);
+			if(last && previousOther.find(removePosition->value->_id) == previousOther.end())
+				cache.stringToId.erase(line);
+
+			auto tmp = removePosition;
+			++removePosition;
+			tree.erase(tmp);
+		}
+	}
+
+	void remove (cache_t& cache, size_t offset, std::vector<std::string> const& lines)
+	{
+		remove(cache, cache.line_position_to_id_A, offset, lines, cache.previousA, cache.previousB);
+	}
+
+	static cache_t::tree_t::iterator link (cache_t& cache, cache_t::tree_t::iterator& newLink, cache_t::top_link_t& previous)
+	{
+		auto end = newLink->value->_previous;
+		auto stringId = newLink->value->_id;
+		auto stringIter = previous.find(stringId);
+		if(stringIter == previous.end()) {
+			previous.emplace(stringId, newLink);
+			return newLink;
+		}
+		auto successor = end;
+		auto foundLink = stringIter->second;
+		while(foundLink != end && foundLink.refresh()->offset > newLink->offset)
+		{
+			successor = foundLink;
+			foundLink = foundLink->value->_previous;
+		}
+
+		newLink->value->_previous = foundLink;
+		if(successor != end)
+			successor->value->_previous = newLink;
+		else
+			previous.emplace(stringId, newLink);
+		return newLink;
+	}
+
+	static void insert (cache_t& cache, cache_t::tree_t& tree, size_t offset, std::vector<std::string> const& lines, cache_t::top_link_t& previous)
+	{
+		auto insertPosition = tree.lower_bound(offset, comp_abs);
+		bool atEnd = insertPosition == tree.end();
 		for(auto& line : lines)
 		{
 			auto alreadyThere = cache.stringToId.find(line);
 			if(alreadyThere == cache.stringToId.end())
 				alreadyThere = cache.stringToId.emplace(line, cache.identity++).first;
-			insertPosition = ++tree.insert(insertPosition, 1, alreadyThere->second);
+			insertPosition = tree.insert(insertPosition, 1, std::make_unique<cache_t::string_node_t>(tree.end(), alreadyThere->second));
+			insertPosition = ++link(cache, insertPosition, previous);
 		}
-		for(auto& lineId : tree)
-			(positions[lineId.value].*field).push_back(lineId.offset);
 	}
 
-	static string_id_positions_t setup (cache_t& cache, std::vector<std::string> const& linesA, std::vector<std::string> const& linesB)
+	void insert (cache_t& cache, size_t offset, std::vector<std::string> const& lines)
 	{
-		string_id_positions_t lines;
-		insert(cache, lines, cache.line_position_to_id_A, &doc_lines_t::a_positions, 0, linesA);
-		insert(cache, lines, cache.line_position_to_id_B, &doc_lines_t::b_positions, 0, linesB);
-		return lines;
+		insert(cache, cache.line_position_to_id_A, offset, lines, cache.previousA);
 	}
 
-	static auto lone_element_in_range (line_numbers_t const& vector, size_t low, size_t high)
+	static void setup (cache_t& cache, std::vector<std::string> const& linesA, std::vector<std::string> const& linesB)
 	{
-		auto lowerBound = std::lower_bound(vector.begin(), vector.end(), low);
-		if(lowerBound == vector.end() || *lowerBound >= high)
-			return vector.end();
-		++lowerBound;
-		if(lowerBound != vector.end() && *lowerBound < high)
-			return vector.end();
-		return --lowerBound;
+		insert(cache, cache.line_position_to_id_A, 0, linesA, cache.previousA);
+		insert(cache, cache.line_position_to_id_B, 0, linesB, cache.previousB);
 	}
 
-	static std::vector<diff::position_t> unique (cache_t& cache, string_id_positions_t& positions, size_t lowA, size_t lowB, size_t highA, size_t highB)
+	auto intersectMaps(unique_map_t& left, unique_map_t& right)
 	{
-		size_t range = highA - lowA;
-		auto lineId = cache.line_position_to_id_A.find(lowA, comp_abs);
+		std::map<size_t, std::pair<size_t, cache_t::string_id_t> > result;
+		unique_map_t::const_iterator il = left.begin();
+		unique_map_t::const_iterator ir = right.begin();
+		while (il != left.end() && ir != right.end())
+		{
+			if (il->first < ir->first)
+				++il;
+			else if (ir->first < il->first)
+				++ir;
+			else
+			{
+				result.insert(std::make_pair(il->second, std::make_pair(ir->second, ir->first)));
+				++il;
+				++ir;
+			}
+		}
+		return result;
+	}
 
-		auto lines = positions.find(lineId->value);
-
-		std::map<size_t, size_t> b_to_a;
+	static unique_map_t lone_elements_in_range(cache_t::tree_t& positions, std::set<cache_t::string_id_t>& condemned,size_t low, size_t high)
+	{
+		size_t range = high - low;
+		auto lineId = positions.lower_bound(high, comp_abs);
+		auto end = positions.end();
+		unique_map_t uniques;
 		while(range-- > 0)
 		{
-			if(lines != positions.end() && lines->first != lineId->value) {
-				lines = positions.find(lineId->value);
-			}
-			auto tempLines = lines++;
-			++lineId;
-			auto iterB = lone_element_in_range(tempLines->second.b_positions, lowB, highB);
-			if(iterB == tempLines->second.b_positions.end())
-				continue;
-			auto iterA = lone_element_in_range(tempLines->second.a_positions, lowA, highA);
-			if(iterA == tempLines->second.a_positions.end())
-				continue;
-			b_to_a[*iterB] = *iterA;
+			--lineId;
+			auto foundLink = lineId->value->_previous;
+			if(condemned.find(lineId->value->_id) == condemned.end() && (foundLink == end || foundLink.refresh()->offset < low))
+				uniques[lineId->value->_id] = lineId->offset;
+			else
+				condemned.insert(lineId->value->_id);
 		}
+		return uniques;
+	}
+
+	static std::vector<diff::position_t> unique (cache_t& cache, size_t lowA, size_t lowB, size_t highA, size_t highB)
+	{
+		std::set<cache_t::string_id_t> condemned;
+		auto a = lone_elements_in_range(cache.line_position_to_id_A, condemned, lowA, highA);
+		auto b = lone_elements_in_range(cache.line_position_to_id_B, condemned, lowB, highB);
+		auto b_to_a = intersectMaps(b, a);
 
 		// patience sort
 		std::map<size_t, diff::position_t> backpointer;
@@ -83,12 +181,12 @@ namespace diff
 		topOfPiles.emplace_back(SIZE_MAX, SIZE_MAX);
 		for(auto it : b_to_a)
 		{
-			auto insert_at = std::upper_bound(topOfPiles.begin()+1, topOfPiles.end(), it.second, [](size_t const key, diff::position_t const& position){ return key < position.a_pos;});
+			auto insert_at = std::upper_bound(topOfPiles.begin()+1, topOfPiles.end(), it.second.first, [](size_t const key, diff::position_t const& position){ return key < position.a_pos;});
 
 			if(insert_at == topOfPiles.end())
-				insert_at = topOfPiles.insert(insert_at, diff::position_t{it.second, it.first});
+				insert_at = topOfPiles.insert(insert_at, diff::position_t{it.second.first, it.first});
 			else
-				*insert_at = diff::position_t{it.second, it.first};
+				*insert_at = diff::position_t{it.second.first, it.first};
 			backpointer[it.first]=*(--insert_at);
 		}
 
@@ -101,53 +199,106 @@ namespace diff
 		return topOfPiles;
 	}
 
-	static void recurse (cache_t& cache, string_id_positions_t& positions, std::vector<std::string> const& linesA, std::vector<std::string> const& linesB, size_t lowA, size_t lowB, size_t highA, size_t highB, std::vector<diff::position_t >& matches)
+	static void recurse (cache_t& cache, size_t lowA, size_t lowB, size_t highA, size_t highB, std::vector<diff::position_t >& matches)
 	{
 		if(lowA == highA || lowB == highB)
 			return;
-		auto uniques = unique(cache, positions, lowA, lowB, highA, highB);
+		auto uniques = unique(cache, lowA, lowB, highA, highB);
 		if(uniques.size() > 0)
 		{
-			// matches are treated range markers, we need an end marker to close the range the last match opened
+			// matches are treated as range markers, we need an end marker to close the range the last match opened
 			// e.g. [lastMatch, highA)
 			uniques.emplace_back(highA, highB);
-
+			// and a begin marker
 			diff::position_t previousPosition{lowA, lowB};
-			for(auto pos : uniques)
+			for(auto& pos : uniques)
 			{
-				recurse(cache, positions, linesA, linesB, previousPosition.a_pos, previousPosition.b_pos, pos.a_pos, pos.b_pos, matches);
+				recurse(cache, previousPosition.a_pos, previousPosition.b_pos, pos.a_pos, pos.b_pos, matches);
 				previousPosition = pos;
 				matches.push_back(previousPosition++);
 			}
 			// pop off the last match, which corresponded to the end position.
 			matches.pop_back();
+			return;
 		}
-		else if (linesA[lowA] == linesB[lowB])
-		{
+
+		auto lineA = cache.line_position_to_id_A.lower_bound(lowA, comp_abs);
+		auto lineB = cache.line_position_to_id_B.lower_bound(lowB, comp_abs);
+		if (lineA->value->_id == lineB->value->_id)
+		{			
 			// find match from beginning
-			while(lowA < highA && lowB < highB && linesA[lowA] == linesB[lowB])
-				matches.emplace_back(lowA++, lowB++);
-			recurse(cache, positions, linesA, linesB, lowA, lowB, highA, highB, matches);
+			while(lineA->offset < highA && lineB->offset < highB && lineA->value->_id == lineB->value->_id)
+			{
+				matches.emplace_back(lineA->offset, lineB->offset);
+				++lineA;
+				++lineB;
+			}
+			recurse(cache, lineA->offset, lineB->offset, highA, highB, matches);
+			return;
 		}
-		else if (linesA[--highA] == linesB[--highB])
+
+		lineA = cache.line_position_to_id_A.lower_bound(highA, comp_abs);
+		lineB = cache.line_position_to_id_B.lower_bound(highB, comp_abs);
+		size_t equalCount = 0;
+		bool overshot = true;
+		while((--lineA)->value->_id == (--lineB)->value->_id)
 		{
-			size_t oldHighA = highA;
-			// find match from end
-			while(highA > lowA && highB > lowB && linesA[--highA] == linesB[--highB])
-				;// don't add matches yet
-			recurse(cache, positions, linesA, linesB, lowA, lowB, highA, highB, matches);
+			++equalCount;
+			if(lineA->offset == lowA || lineB->offset == lowB)
+			{
+				overshot = false;
+				break;
+			}
+		}
+		if(equalCount > 0)
+		{
+			highA = lineA->offset;
+			highB = lineB->offset;
+
+			if(overshot)
+			{
+				++highA;
+				++highB;
+			}
+			recurse(cache, lowA, lowB, highA, highB, matches);
 			// add end matches
-			while(highA != oldHighA)
+
+			while(equalCount--) {
 				matches.emplace_back(highA++, highB++);
+			}
 		}
 	}
 
 	std::vector<diff::position_t> diff (std::vector<std::string> const& linesA, std::vector<std::string> const& linesB)
 	{
 		cache_t cache;
-		auto lines = setup(cache, linesA, linesB);
+		timer_t t;
+		setup(cache, linesA, linesB);
+		std::cout << "setup:" << t.elapsed() << std::endl;
 		std::vector<diff::position_t> matches;
-		recurse(cache, lines, linesA, linesB, 0, 0, linesA.size(), linesB.size(), matches);
+		t.reset();
+		recurse(cache, 0, 0, linesA.size(), linesB.size(), matches);
+		std::cout << "recurse:" << t.elapsed() << std::endl;
 		return matches;
 	}
+
+	cache_t updateable_diff (std::vector<std::string> const& linesA, std::vector<std::string> const& linesB)
+	{
+		cache_t cache;
+		timer_t t;
+		setup(cache, linesA, linesB);
+		std::cout << "setup:" << t.elapsed() << std::endl;
+		std::vector<diff::position_t> matches;
+		t.reset();
+		return cache;	
+	}
+
+	std::vector<position_t> update (cache_t& cache)
+	{
+		//dump(cache);
+		std::vector<diff::position_t> matches;
+		recurse(cache, 0, 0, cache.line_position_to_id_A.aggregated(), cache.line_position_to_id_B.aggregated(), matches);
+		return matches;
+	}
+	
 }
