@@ -34,9 +34,9 @@ namespace diff
 
 			size_t _id;
 		};
-		std::map<string_id_t, std::pair<std::vector<size_t>, std::vector<size_t> > > line_positions;
-		oak::basic_tree_t<size_t, string_id_t> line_position_to_id_A;
-		oak::basic_tree_t<size_t, string_id_t> line_position_to_id_B;
+		typedef oak::basic_tree_t<size_t, string_id_t> tree_t;
+		tree_t line_position_to_id_A;
+		tree_t line_position_to_id_B;
 		
 		string_id_t identity;
 		std::map<std::string, string_id_t> stringToId;
