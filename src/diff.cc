@@ -92,13 +92,13 @@ namespace diff
 			backpointer[it.first]=*(--insert_at);
 		}
 
-		// TODO topOfPiles could be reused as result vector
-		auto& item =  topOfPiles.back();
-		std::vector<diff::position_t> result(topOfPiles.size()-1);
-		size_t index = result.size();
+		// using topOfPiles as result vector
+		auto& item = topOfPiles.back();
+		size_t index = topOfPiles.size() - 1;
 		while(item.b_pos != SIZE_MAX)
-			item = backpointer[(result[--index] = item).b_pos];
-		return result;
+			item = backpointer[(topOfPiles[--index] = item).b_pos];
+		topOfPiles.resize(topOfPiles.size() - 1);
+		return topOfPiles;
 	}
 
 	static void recurse (cache_t& cache, string_id_positions_t& positions, std::vector<std::string> const& linesA, std::vector<std::string> const& linesB, size_t lowA, size_t lowB, size_t highA, size_t highB, std::vector<diff::position_t >& matches)
