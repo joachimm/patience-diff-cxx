@@ -98,7 +98,7 @@ namespace diff
 		if(successor != end)
 			successor->value->_previous = newLink;
 		else
-			previous.emplace(stringId, newLink);
+			stringIter->second = newLink;
 		return newLink;
 	}
 
