@@ -1,4 +1,4 @@
-#C++ Patience Diff
+# C++ Patience Diff
 The Patience Diff in C++14
 ##Algorithm
 The Patience Diff algorithm is best explained by [Alfedenzo][] and [Bram Cohen][] who invented the algorithm. My additions are to try to make the diff structure updateable. This is work in progress.
@@ -6,11 +6,11 @@ The Patience Diff algorithm is best explained by [Alfedenzo][] and [Bram Cohen][
 Build:
 
 	c++ -std=c++1y -stdlib=libc++ src/*.cc -o diff
-##Run
+## Run
 The following examples use the example files in the root folder. I found them on [Alfedenzo][] page, they seem to be used in various places when discussing diff algorithms so I thought I would continue the tradition. I added line endings on the last row to get around an issue with c++ std::getline. The main.cc binary is a test-bed for developing the algorithm and should probably not be used as a diff tool for any other purpose.
 
 	./diff file1.txt file2.txt
-###Incremental
+### Incremental
 It is possible to update the first file after the fact. The format is the following:
 
 	operator:point:sourceFile:start:length
@@ -20,7 +20,7 @@ Be careful when using the - operator. The line picked from the source need to be
 
 	./diff file1.txt file1.txt -:2:file1.txt:2:1 -:23:file1.txt:24:1 +:23:file2.txt:23:1
 	
-##Future Work
+## Future Work
 The Patience Diff works by finding lines that are equal and only exist once in both files. Such a sequence of line-index pairs is compiled. The Patience Sort algorithm is then applied to this sequence of equal pairs, to find the longest sequence of lines that maintains order in both files. Maintains order, means that line 1 comes before line 3, but does not mean that all unique across both files will be part of the resulting sequence.
 
 This algorithm is then recursively performed between the lines in the sequence, with the hope of yielding pairs that are now unique due to the more limited range. If no new ranges are found, try to find identical but no unique pairs by comparing line by line from the front or back.
@@ -62,7 +62,7 @@ Lets say that the insertion did not contain any uniques and the first recursion 
 There would still be a need to recurse between (3:7),(5:9), since thats the range where the modification happened.
 
 
-##License
+## License
 GPLv3 due to inclusion of basic_tree.h from the TextMate source.
 
 [Alfedenzo]:	http://alfedenzo.livejournal.com/170301.html
